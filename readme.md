@@ -13,7 +13,7 @@
 - **Unified Restart Manager:** Mempermudah restart service per versi PHP-FPM (`myfpm restart 81`), Redis (`myfpm restart redis`), Apache (`myfpm restart apache`), maupun seluruh service sekaligus (`myfpm restart all`).
 - **Automated User FPM Pool:** Membuat file konfigurasi pool FPM khusus untuk user sistem secara instan, lengkap dengan pengaturan socket dan panduan `.htaccess`.
 - **Global PHP Shortcuts:** Membuat shortcut global per versi PHP (contoh: `php81`, `php82`, `php74`) sehingga bisa langsung dipakai menjalankan perintah CLI/Artisan tanpa repot set alias manual.
-- **Session PHP Switching:** Memindahkan versi PHP aktif di sesi terminal saat ini dengan mudah menggunakan `myfpm use {version}`.
+- **Session PHP Switching:** Memindahkan versi PHP aktif di sesi terminal saat ini dengan mudah menggunakan `source myfpm use {version}` (dapat digunakan oleh user non-root).
 
 ---
 
@@ -94,31 +94,36 @@ myfpm redis install
 
 ### 5. Membuat FPM Pool untuk User Sistem
 
-Membuat konfigurasi socket FPM khusus untuk user tertentu (misalnya user `akademik`) menggunakan versi PHP tertentu:
+Membuat konfigurasi socket FPM khusus untuk user tertentu (misalnya user `billing` atau `akademik`) menggunakan versi PHP tertentu:
 
 ```bash
-myfpm -u akademik -v 81
+myfpm -u billing -v 72
+# Variasi format lain yang didukung:
+myfpm -u billing 72
+myfpm user billing 72
 ```
 
-*Script ini akan otomatis menghasilkan path socket `/run/php81-akademik.sock` dan mencetak blok kode `.htaccess` yang siap Anda pasang di direktori project web.*
+*Script ini akan otomatis menghasilkan path socket `/run/php72-billing.sock` dan mencetak blok kode `.htaccess` yang siap Anda pasang di direktori project web.*
 
-### 6. Switch Versi PHP di Sesi Terminal
+### 6. Switch Versi PHP di Sesi Terminal (User & Root)
 
-Mengganti versi PHP dan Composer aktif untuk sesi terminal saat ini:
+Mengganti versi PHP dan Composer aktif untuk sesi terminal saat ini (bisa dijalankan oleh user biasa maupun root):
 
 ```bash
-myfpm use 81
+source myfpm use 81
+# atau
+. myfpm use 81
 ```
 
 Untuk kembali ke versi default bawaan CWP:
 
 ```bash
-myfpm use default
+source myfpm use default
 ```
 
 ### 7. Menjalankan Command PHP Spesifik (Global CLI)
 
-Anda dapat langsung mengeksekusi versi PHP tertentu tanpa harus melakukan `use` terlebih dahulu (sangat berguna untuk cron job atau perintah Artisan):
+Anda dapat langsung mengeksekusi versi PHP tertentu tanpa harus melakukan `use` terlebih dahulu (bisa digunakan oleh user biasa tanpa root):
 
 ```bash
 php81 artisan config:clear
@@ -132,9 +137,10 @@ php74 -v
 
 Script ini dilengkapi dengan beberapa validasi untuk mencegah error di server:
 
-* **Root Privilege Check:** Menolak eksekusi jika tidak dijalankan sebagai `root`.
+* **Scoped Root Privilege Check:** Membatasi eksekusi root hanya pada perintah sistem (instalasi, buat pool, restart service), sedangkan perintah seperti `use`, `ini`, `redis status`, dan `help` dapat diakses oleh user biasa (non-root).
 * **OS Support Validation:** Mencegah instalasi versi PHP lama (seperti PHP < 8.0) di AlmaLinux/RHEL 9.
 * **System User Check:** Memastikan user Linux tujuan benar-benar terdaftar di server (`/etc/passwd`) sebelum membuat file pool FPM.
+* **Smart Repository Check:** Memeriksa ketersediaan repo Remi/EPEL via `rpm -q` agar tidak error jika repo sudah ada, dan menghindari `yum update` global yang berisiko.
 * **Yum Error Handling:** Menghentikan proses secara aman jika terjadi kegagalan unduh atau instalasi dari repository.
 
 ---

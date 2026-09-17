@@ -472,15 +472,29 @@ case "$1" in
         check_root
         install_php "$2"
         ;;
-    -u|user)
+    -u|user|pool)
         check_root
-        shift
         USER_NAME=""
         PHP_VER=""
         while [[ "$#" -gt 0 ]]; do
-            case $1 in
-                -u|--user) USER_NAME="$2"; shift ;;
-                -v|--version) PHP_VER="$2"; shift ;;
+            case "$1" in
+                -u|--user)
+                    USER_NAME="$2"
+                    shift
+                    ;;
+                -v|--version)
+                    PHP_VER="$2"
+                    shift
+                    ;;
+                *)
+                    if [[ "$1" != "-u" && "$1" != "user" && "$1" != "pool" ]]; then
+                        if [ -z "$USER_NAME" ]; then
+                            USER_NAME="$1"
+                        elif [ -z "$PHP_VER" ]; then
+                            PHP_VER="$1"
+                        fi
+                    fi
+                    ;;
             esac
             shift
         done
