@@ -1,0 +1,285 @@
+#!/bin/bash
+
+# Pastikan script dijalankan sebagai root
+if [ "$EUID" -ne 0 ]; then
+  echo "Error: Script ini harus dijalankan sebagai root!"
+  exit 1
+fi
+
+# Fungsi untuk mendeteksi versi OS RHEL/CentOS/AlmaLinux (7, 8, atau 9)
+get_os_version() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "$VERSION_ID" | cut -d. -f1
+    else
+        echo "7"
+    fi
+}
+
+OS_VER=$(get_os_version)
+
+# Fungsi Bantuan / Help (-h / --help)
+show_help() {
+    echo "======================================================================"
+    echo "                 MYFPM - PHP & FPM Manager for CWP                    "
+    echo "======================================================================"
+    echo "Penggunaan yang tersedia:"
+    echo ""
+    echo "  1. Install PHP & Ekstensi Lengkap:"
+    echo "     myfpm -i {version}"
+    echo "     Contoh: myfpm -i 81"
+    echo "     (Otomatis install repo EPEL/Remi, modul lengkap, fpm, start service,"
+    echo "      aktifkan proxy_fcgi apache, dan buat shortcut global php{version})"
+    echo ""
+    echo "  2. Buat Pool FPM untuk User Sistem:"
+    echo "     myfpm -u {user} -v {version}"
+    echo "     Contoh: myfpm -u akademik -v 81"
+    echo "     (Membuat config socket khusus user dan panduan .htaccess)"
+    echo ""
+    echo "  3. Switch Versi PHP Aktif di Sesi Terminal (Aliasing):"
+    echo "     myfpm use {version}"
+    echo "     Contoh: myfpm use 81"
+    echo "     Contoh kembali ke default: myfpm use default (atau myfpm use)"
+    echo ""
+    echo "  4. Bantuan Command:"
+    echo "     myfpm -h  atau  myfpm --help"
+    echo "----------------------------------------------------------------------"
+    echo " Tips Global Shortcut:"
+    echo " Anda bisa langsung menjalankan perintah PHP spesifik versi tanpa 'use'"
+    echo " Contoh: php81 artisan config:clear"
+    echo "         php82 artisan cache:clear"
+    echo "         php74 --version"
+    echo "======================================================================"
+}
+
+# 1. Fungsi Install PHP (-i) dengan Validasi Gagal Install & Versi OS
+install_php() {
+    local php_ver=$1
+    if [ -z "$php_ver" ]; then
+        echo "Error: Versi PHP belum dimasukkan. Contoh: myfpm -i 81"
+        exit 1
+    fi
+
+    # Validasi dukungan OS untuk versi PHP tertentu
+    if [ "$OS_VER" -eq 9 ] && [ "$php_ver" -lt 80 ]; then
+        echo "Error: PHP versi $php_ver sudah tidak disupport di AlmaLinux/RHEL 9!"
+        exit 1
+    fi
+
+    echo "==> Menyiapkan Repository EPEL & Remi (OS Versi: $OS_VER)..."
+    yum install epel-release -y
+    if [ $? -ne 0 ]; then
+        echo "Error: Gagal menginstall repository EPEL."
+        exit 1
+    fi
+
+    yum install "https://rpms.remirepo.net/enterprise/remi-release-${OS_VER}.rpm" -y
+    if [ $? -ne 0 ]; then
+        echo "Error: Gagal menginstall Remi Repository."
+        exit 1
+    fi
+
+    yum update -y
+
+    local pkg_name="php${php_ver}"
+    echo "==> Menginstall ${pkg_name} dan ekstensi lengkap..."
+    yum install -y \
+        ${pkg_name} \
+        ${pkg_name}-php-fpm \
+        ${pkg_name}-php-cli \
+        ${pkg_name}-php-mysqlnd \
+        ${pkg_name}-php-gd \
+        ${pkg_name}-php-mbstring \
+        ${pkg_name}-php-xml \
+        ${pkg_name}-php-opcache \
+        ${pkg_name}-php-curl \
+        ${pkg_name}-php-zip \
+        ${pkg_name}-php-bcmath \
+        ${pkg_name}-php-intl \
+        ${pkg_name}-php-sodium
+
+    # Validasi jika yum install gagal di tengah jalan
+    if [ $? -ne 0 ]; then
+        echo "===================================================="
+        echo " ERROR: Proses instalasi yum terhenti atau gagal!"
+        echo " Kemungkinan penyebab:"
+        echo " - Versi PHP '$php_ver' tidak valid / tidak ada di Remi."
+        echo " - Koneksi internet terputus atau repository bermasalah."
+        echo "===================================================="
+        exit 1
+    fi
+
+    echo "==> Mengaktifkan dan menjalankan service ${pkg_name}-php-fpm..."
+    systemctl enable ${pkg_name}-php-fpm
+    systemctl start ${pkg_name}-php-fpm
+    if [ $? -ne 0 ]; then
+        echo "Error: Gagal menjalankan service ${pkg_name}-php-fpm."
+        exit 1
+    fi
+
+    # Cek dan aktifkan mod_proxy_fcgi di Apache CWP
+    local httpd_conf="/usr/local/apache/conf/httpd.conf"
+    if [ -f "$httpd_conf" ]; then
+        if grep -q "#LoadModule proxy_fcgi_module" "$httpd_conf"; then
+            sed -i 's/#LoadModule proxy_fcgi_module/LoadModule proxy_fcgi_module/' "$httpd_conf"
+            echo "==> Modul proxy_fcgi diaktifkan pada Apache."
+            systemctl restart httpd
+        elif ! grep -q "LoadModule proxy_fcgi_module" "$httpd_conf"; then
+            echo "LoadModule proxy_fcgi_module modules/mod_proxy_fcgi.so" >> "$httpd_conf"
+            echo "==> Modul proxy_fcgi ditambahkan ke Apache."
+            systemctl restart httpd
+        fi
+    fi
+
+    # Backup www.conf bawaan
+    local www_conf="/etc/opt/remi/${pkg_name}/php-fpm.d/www.conf"
+    if [ -f "$www_conf" ] && [ ! -f "${www_conf}.backup" ]; then
+        cp "$www_conf" "${www_conf}.backup"
+        echo "==> Backup www.conf berhasil dibuat."
+    fi
+
+    # Buat Symlink Global /usr/bin/php{version} agar bisa dipanggil langsung (misal: php81 artisan)
+    local bin_path="/usr/bin/php${php_ver}"
+    local remi_bin="/opt/remi/${pkg_name}/root/usr/bin/php"
+    if [ -f "$remi_bin" ]; then
+        ln -sf "$remi_bin" "$bin_path"
+        echo "==> Shortcut global '${pkg_name}' berhasil dibuat ($bin_path)."
+    fi
+
+    echo "==> Instalasi PHP $php_ver Selesai!"
+}
+
+# 2. Fungsi Setup User Pool (-u dan -v) dengan Validasi User & FPM
+setup_user_pool() {
+    local user=$1
+    local php_ver=$2
+
+    if [ -z "$user" ] || [ -z "$php_ver" ]; then
+        echo "Error: Parameter kurang lengkap. Gunakan: myfpm -u {user} -v {version}"
+        exit 1
+    fi
+
+    # Validasi apakah system user benar-benar ada di server
+    if ! id "$user" &>/dev/null; then
+        echo "Error: User sistem '$user' tidak ditemukan di server ini!"
+        echo "Silakan buat user tersebut terlebih dahulu atau pastikan penulisan namanya benar."
+        exit 1
+    fi
+
+    local pkg_name="php${php_ver}"
+    local pool_dir="/etc/opt/remi/${pkg_name}/php-fpm.d"
+    local pool_file="${pool_dir}/${user}.conf"
+    local default_pool="${pool_dir}/www.conf"
+    local socket_path="/run/${pkg_name}-${user}.sock"
+
+    # Validasi apakah PHP FPM versi tersebut sudah diinstall
+    if [ ! -d "$pool_dir" ]; then
+        echo "Error: PHP FPM versi $php_ver belum terinstall!"
+        echo "Install terlebih dahulu dengan perintah: myfpm -i $php_ver"
+        exit 1
+    fi
+
+    if [ ! -f "$default_pool" ]; then
+        echo "Error: File template www.conf tidak ditemukan di $default_pool"
+        exit 1
+    fi
+
+    echo "==> Membuat konfigurasi pool FPM untuk user '$user' (PHP $php_ver)..."
+    cp "$default_pool" "$pool_file"
+
+    # Modifikasi isi file konfigurasi pool
+    sed -i "s/\[www\]/\[${user}\]/g" "$pool_file"
+    sed -i "s/^user = .*/user = ${user}/g" "$pool_file"
+    sed -i "s/^group = .*/group = ${user}/g" "$pool_file"
+    
+    sed -i "s/^;listen.owner = .*/listen.owner = nobody/g" "$pool_file"
+    sed -i "s/^listen.owner = .*/listen.owner = nobody/g" "$pool_file"
+    
+    sed -i "s/^;listen.group = .*/listen.group = nobody/g" "$pool_file"
+    sed -i "s/^listen.group = .*/listen.group = nobody/g" "$pool_file"
+    
+    sed -i "s/^;listen.mode = .*/listen.mode = 0660/g" "$pool_file"
+    sed -i "s/^listen.mode = .*/listen.mode = 0660/g" "$pool_file"
+
+    # Comment listen.allowed_clients
+    sed -i "s/^listen.allowed_clients/#listen.allowed_clients/g" "$pool_file"
+    sed -i "s/^;listen.allowed_clients/#listen.allowed_clients/g" "$pool_file"
+
+    # Set path listen socket
+    sed -i "s#^listen = .*#listen = ${socket_path}#g" "$pool_file"
+
+    # Comment listen.acl_users
+    sed -i "s/^listen.acl_users/#listen.acl_users/g" "$pool_file"
+    sed -i "s/^;listen.acl_users/#listen.acl_users/g" "$pool_file"
+
+    echo "==> Merestart service ${pkg_name}-php-fpm..."
+    systemctl restart ${pkg_name}-php-fpm
+    if [ $? -ne 0 ]; then
+        echo "Error: Gagal merestart service ${pkg_name}-php-fpm. Periksa konfigurasi pool."
+        exit 1
+    fi
+
+    echo ""
+    echo "===================================================="
+    echo " SUKSES! Pool FPM untuk user '$user' berhasil dibuat."
+    echo " Lokasi Socket: ${socket_path}"
+    echo "===================================================="
+    echo " Tambahkan konfigurasi berikut ke file .htaccess web Anda:"
+    echo "----------------------------------------------------"
+    echo "<FilesMatch \\.php$>"
+    echo "    SetHandler \"proxy:unix:${socket_path}|fcgi://localhost/\""
+    echo "</FilesMatch>"
+    echo "===================================================="
+}
+
+# 3. Fungsi Switch CLI Version (myfpm use {version})
+use_php() {
+    local version=$1
+
+    if [[ -z "$version" || "$version" == "default" ]]; then
+        unalias php 2>/dev/null
+        unalias composer 2>/dev/null
+        echo "  Kembali ke PHP Default CWP"
+        /usr/local/bin/php -v | head -n 1
+        return
+    fi
+
+    if [ -f "/usr/bin/php$version" ]; then
+        alias php="/usr/bin/php$version"
+        alias composer="/usr/bin/php$version /usr/local/bin/composer"
+
+        echo "  Sesi ini beralih ke PHP $version"
+        /usr/bin/php$version -v | head -n 1
+    else
+        echo "  Error: PHP $version tidak ditemukan."
+    fi
+}
+
+# Parser Argumen Utama
+case "$1" in
+    -i)
+        install_php "$2"
+        ;;
+    -u)
+        shift
+        USER_NAME=""
+        PHP_VER=""
+        while [[ "$#" -gt 0 ]]; do
+            case $1 in
+                -u|--user) USER_NAME="$2"; shift ;;
+                -v|--version) PHP_VER="$2"; shift ;;
+            esac
+            shift
+        done
+        setup_user_pool "$USER_NAME" "$PHP_VER"
+        ;;
+    use)
+        use_php "$2"
+        ;;
+    -h|--help)
+        show_help
+        ;;
+    *)
+        show_help
+        ;;
+esac
