@@ -1,4 +1,3 @@
-```markdown
 # MyFPM - PHP & FPM Manager for CWP (CentOS Web Panel / AlmaLinux)
 
 `myfpm` adalah CLI utility script berbasis Bash yang dirancang khusus untuk mempermudah manajemen instalasi multiple versi PHP, konfigurasi FPM pool per-user, manajemen versi PHP CLI (switching), hingga otomatisasi integrasi dengan Apache Web Server di environment CWP (CentOS Web Panel / AlmaLinux 7, 8, dan 9).
