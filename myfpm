@@ -94,19 +94,24 @@ install_php() {
     fi
 
     echo "==> Menyiapkan Repository EPEL & Remi (OS Versi: $OS_VER)..."
-    yum install epel-release -y
-    if [ $? -ne 0 ]; then
-        echo "Error: Gagal menginstall repository EPEL."
-        exit 1
+    if ! rpm -q epel-release &>/dev/null; then
+        yum install epel-release -y
+    else
+        echo "==> Repository EPEL sudah terinstall."
     fi
 
-    yum install "https://rpms.remirepo.net/enterprise/remi-release-${OS_VER}.rpm" -y
-    if [ $? -ne 0 ]; then
-        echo "Error: Gagal menginstall Remi Repository."
-        exit 1
+    if ! rpm -q remi-release &>/dev/null; then
+        yum install "https://rpms.remirepo.net/enterprise/remi-release-${OS_VER}.rpm" -y
+        if [ $? -ne 0 ]; then
+            rpm -Uvh "https://rpms.remirepo.net/enterprise/remi-release-${OS_VER}.rpm" 2>/dev/null
+            if ! rpm -q remi-release &>/dev/null; then
+                echo "Error: Gagal menginstall Remi Repository."
+                exit 1
+            fi
+        fi
+    else
+        echo "==> Repository Remi sudah terinstall."
     fi
-
-    yum update -y
 
     local pkg_name="php${php_ver}"
     echo "==> Menginstall ${pkg_name}, ekstensi lengkap, dan Redis extension..."
@@ -430,7 +435,9 @@ manage_redis() {
     case "$action" in
         install)
             echo "==> Menginstall Redis Server..."
-            yum install epel-release -y
+            if ! rpm -q epel-release &>/dev/null; then
+                yum install epel-release -y
+            fi
             yum install redis -y
             systemctl enable --now redis
             echo "==> Redis Server berhasil diinstall dan dijalankan."
