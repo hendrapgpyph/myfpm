@@ -1,5 +1,3 @@
-Berikut adalah isi `README.md` dalam format teks mentah (*raw*) agar bisa langsung Anda *copy-paste* tanpa terformat menjadi elemen HTML atau markdown preview:
-
 ```markdown
 # MyFPM - PHP & FPM Manager for CWP (CentOS Web Panel / AlmaLinux)
 
