@@ -1,11 +1,5 @@
 #!/bin/bash
 
-# Pastikan script dijalankan sebagai root
-if [ "$EUID" -ne 0 ]; then
-  echo "Error: Script ini harus dijalankan sebagai root!"
-  exit 1
-fi
-
 # Fungsi untuk mendeteksi versi OS RHEL/CentOS/AlmaLinux (7, 8, atau 9)
 get_os_version() {
     if [ -f /etc/os-release ]; then
@@ -17,6 +11,14 @@ get_os_version() {
 }
 
 OS_VER=$(get_os_version)
+
+# Fungsi untuk memastikan perintah dijalankan sebagai root (hanya untuk perintah sistem)
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: Perintah ini harus dijalankan sebagai root!"
+        exit 1
+    fi
+}
 
 # Helper untuk menormalisasi format versi (contoh: 81, 8.1, php81, php8.1, 81.ini -> 81)
 clean_version() {
@@ -31,30 +33,30 @@ show_help() {
     echo "======================================================================"
     echo "Penggunaan yang tersedia:"
     echo ""
-    echo "  1. Install PHP & Ekstensi Lengkap (Termasuk Redis):"
+    echo "  1. Install PHP & Ekstensi Lengkap (Termasuk Redis) [Butuh Root]:"
     echo "     myfpm -i {version}"
     echo "     Contoh: myfpm -i 81  (atau myfpm -i 8.1)"
     echo "     (Otomatis install repo EPEL/Remi, modul lengkap + redis extension,"
     echo "      redis server, fpm, start service, aktifkan proxy_fcgi apache,"
     echo "      dan buat shortcut global php{version})"
     echo ""
-    echo "  2. Buat Pool FPM untuk User Sistem:"
+    echo "  2. Buat Pool FPM untuk User Sistem [Butuh Root]:"
     echo "     myfpm -u {user} -v {version}"
     echo "     Contoh: myfpm -u akademik -v 81"
     echo "     (Membuat config socket khusus user dan panduan .htaccess)"
     echo ""
-    echo "  3. Switch Versi PHP Aktif di Sesi Terminal (Aliasing):"
-    echo "     myfpm use {version}"
-    echo "     Contoh: myfpm use 81"
-    echo "     Contoh kembali ke default: myfpm use default (atau myfpm use)"
+    echo "  3. Switch Versi PHP Aktif di Sesi Terminal (Aliasing) [Bisa Non-Root]:"
+    echo "     source myfpm use {version}   (atau . myfpm use {version})"
+    echo "     Contoh: source myfpm use 81"
+    echo "     Contoh kembali ke default: source myfpm use default"
     echo ""
-    echo "  4. Cek Lokasi & Edit File Konfigurasi (php.ini):"
+    echo "  4. Cek Lokasi & Edit File Konfigurasi (php.ini) [Bisa Non-Root]:"
     echo "     myfpm {version}.ini  atau  myfpm ini {version}"
     echo "     Contoh: myfpm 81.ini"
     echo "     Contoh: myfpm ini 8.1"
     echo "     Contoh langsung edit: myfpm 81.ini -e (atau myfpm ini 81 edit)"
     echo ""
-    echo "  5. Restart Service (PHP-FPM / Redis / Apache / All):"
+    echo "  5. Restart Service (PHP-FPM / Redis / Apache / All) [Butuh Root]:"
     echo "     myfpm restart {version|redis|apache|all}"
     echo "     Contoh: myfpm restart 81       (Restart php81-php-fpm)"
     echo "     Contoh: myfpm restart redis    (Restart service Redis)"
@@ -67,7 +69,7 @@ show_help() {
     echo "  7. Bantuan Command:"
     echo "     myfpm -h  atau  myfpm --help"
     echo "----------------------------------------------------------------------"
-    echo " Tips Global Shortcut:"
+    echo " Tips Global Shortcut (Bisa Langsung Dipakai Non-Root User):"
     echo " Anda bisa langsung menjalankan perintah PHP spesifik versi tanpa 'use'"
     echo " Contoh: php81 artisan config:clear"
     echo "         php82 artisan cache:clear"
@@ -169,11 +171,12 @@ install_php() {
         echo "==> Backup www.conf berhasil dibuat."
     fi
 
-    # Buat Symlink Global /usr/bin/php{version} agar bisa dipanggil langsung (misal: php81 artisan)
+    # Buat Symlink Global /usr/bin/php{version} agar bisa dipanggil langsung oleh semua user (misal: php81 artisan)
     local bin_path="/usr/bin/php${php_ver}"
     local remi_bin="/opt/remi/${pkg_name}/root/usr/bin/php"
     if [ -f "$remi_bin" ]; then
         ln -sf "$remi_bin" "$bin_path"
+        chmod +x "$bin_path" 2>/dev/null
         echo "==> Shortcut global '${pkg_name}' berhasil dibuat ($bin_path)."
     fi
 
@@ -455,9 +458,11 @@ manage_redis() {
 # Parser Argumen Utama
 case "$1" in
     -i|install)
+        check_root
         install_php "$2"
         ;;
     -u|user)
+        check_root
         shift
         USER_NAME=""
         PHP_VER=""
@@ -480,9 +485,13 @@ case "$1" in
         show_ini_path "$1" "$2"
         ;;
     restart)
+        check_root
         restart_service "$2"
         ;;
     redis)
+        if [[ "$2" == "install" || "$2" == "restart" || "$2" == "start" || "$2" == "stop" ]]; then
+            check_root
+        fi
         manage_redis "$2"
         ;;
     -h|--help)
