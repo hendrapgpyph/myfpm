@@ -18,6 +18,12 @@ get_os_version() {
 
 OS_VER=$(get_os_version)
 
+# Helper untuk menormalisasi format versi (contoh: 81, 8.1, php81, php8.1, 81.ini -> 81)
+clean_version() {
+    local input="$1"
+    echo "$input" | sed -E 's/^php//i; s/\.ini$//i; s/\.//g'
+}
+
 # Fungsi Bantuan / Help (-h / --help)
 show_help() {
     echo "======================================================================"
@@ -25,11 +31,12 @@ show_help() {
     echo "======================================================================"
     echo "Penggunaan yang tersedia:"
     echo ""
-    echo "  1. Install PHP & Ekstensi Lengkap:"
+    echo "  1. Install PHP & Ekstensi Lengkap (Termasuk Redis):"
     echo "     myfpm -i {version}"
-    echo "     Contoh: myfpm -i 81"
-    echo "     (Otomatis install repo EPEL/Remi, modul lengkap, fpm, start service,"
-    echo "      aktifkan proxy_fcgi apache, dan buat shortcut global php{version})"
+    echo "     Contoh: myfpm -i 81  (atau myfpm -i 8.1)"
+    echo "     (Otomatis install repo EPEL/Remi, modul lengkap + redis extension,"
+    echo "      redis server, fpm, start service, aktifkan proxy_fcgi apache,"
+    echo "      dan buat shortcut global php{version})"
     echo ""
     echo "  2. Buat Pool FPM untuk User Sistem:"
     echo "     myfpm -u {user} -v {version}"
@@ -41,7 +48,23 @@ show_help() {
     echo "     Contoh: myfpm use 81"
     echo "     Contoh kembali ke default: myfpm use default (atau myfpm use)"
     echo ""
-    echo "  4. Bantuan Command:"
+    echo "  4. Cek Lokasi & Edit File Konfigurasi (php.ini):"
+    echo "     myfpm {version}.ini  atau  myfpm ini {version}"
+    echo "     Contoh: myfpm 81.ini"
+    echo "     Contoh: myfpm ini 8.1"
+    echo "     Contoh langsung edit: myfpm 81.ini -e (atau myfpm ini 81 edit)"
+    echo ""
+    echo "  5. Restart Service (PHP-FPM / Redis / Apache / All):"
+    echo "     myfpm restart {version|redis|apache|all}"
+    echo "     Contoh: myfpm restart 81       (Restart php81-php-fpm)"
+    echo "     Contoh: myfpm restart redis    (Restart service Redis)"
+    echo "     Contoh: myfpm restart all      (Restart seluruh service)"
+    echo ""
+    echo "  6. Manajemen Standalone Redis:"
+    echo "     myfpm redis [install|status|restart|start|stop]"
+    echo "     Contoh: myfpm redis status"
+    echo ""
+    echo "  7. Bantuan Command:"
     echo "     myfpm -h  atau  myfpm --help"
     echo "----------------------------------------------------------------------"
     echo " Tips Global Shortcut:"
@@ -54,11 +77,13 @@ show_help() {
 
 # 1. Fungsi Install PHP (-i) dengan Validasi Gagal Install & Versi OS
 install_php() {
-    local php_ver=$1
-    if [ -z "$php_ver" ]; then
+    local raw_ver=$1
+    if [ -z "$raw_ver" ]; then
         echo "Error: Versi PHP belum dimasukkan. Contoh: myfpm -i 81"
         exit 1
     fi
+
+    local php_ver=$(clean_version "$raw_ver")
 
     # Validasi dukungan OS untuk versi PHP tertentu
     if [ "$OS_VER" -eq 9 ] && [ "$php_ver" -lt 80 ]; then
@@ -82,7 +107,7 @@ install_php() {
     yum update -y
 
     local pkg_name="php${php_ver}"
-    echo "==> Menginstall ${pkg_name} dan ekstensi lengkap..."
+    echo "==> Menginstall ${pkg_name}, ekstensi lengkap, dan Redis extension..."
     yum install -y \
         ${pkg_name} \
         ${pkg_name}-php-fpm \
@@ -96,7 +121,8 @@ install_php() {
         ${pkg_name}-php-zip \
         ${pkg_name}-php-bcmath \
         ${pkg_name}-php-intl \
-        ${pkg_name}-php-sodium
+        ${pkg_name}-php-sodium \
+        ${pkg_name}-php-pecl-redis\*
 
     # Validasi jika yum install gagal di tengah jalan
     if [ $? -ne 0 ]; then
@@ -108,6 +134,11 @@ install_php() {
         echo "===================================================="
         exit 1
     fi
+
+    echo "==> Menyiapkan dan mengaktifkan service Redis Server..."
+    yum install -y redis
+    systemctl enable redis 2>/dev/null
+    systemctl start redis 2>/dev/null
 
     echo "==> Mengaktifkan dan menjalankan service ${pkg_name}-php-fpm..."
     systemctl enable ${pkg_name}-php-fpm
@@ -146,13 +177,14 @@ install_php() {
         echo "==> Shortcut global '${pkg_name}' berhasil dibuat ($bin_path)."
     fi
 
-    echo "==> Instalasi PHP $php_ver Selesai!"
+    echo "==> Instalasi PHP $php_ver & Redis Selesai!"
 }
 
 # 2. Fungsi Setup User Pool (-u dan -v) dengan Validasi User & FPM
 setup_user_pool() {
     local user=$1
-    local php_ver=$2
+    local raw_ver=$2
+    local php_ver=$(clean_version "$raw_ver")
 
     if [ -z "$user" ] || [ -z "$php_ver" ]; then
         echo "Error: Parameter kurang lengkap. Gunakan: myfpm -u {user} -v {version}"
@@ -234,15 +266,17 @@ setup_user_pool() {
 
 # 3. Fungsi Switch CLI Version (myfpm use {version})
 use_php() {
-    local version=$1
+    local raw_ver=$1
 
-    if [[ -z "$version" || "$version" == "default" ]]; then
+    if [[ -z "$raw_ver" || "$raw_ver" == "default" ]]; then
         unalias php 2>/dev/null
         unalias composer 2>/dev/null
         echo "  Kembali ke PHP Default CWP"
         /usr/local/bin/php -v | head -n 1
         return
     fi
+
+    local version=$(clean_version "$raw_ver")
 
     if [ -f "/usr/bin/php$version" ]; then
         alias php="/usr/bin/php$version"
@@ -255,12 +289,175 @@ use_php() {
     fi
 }
 
+# 4. Fungsi Menampilkan / Mengedit Lokasi File INI (myfpm 81.ini / myfpm ini 81)
+show_ini_path() {
+    local raw_ver=$1
+    local action=$2
+    local php_ver=$(clean_version "$raw_ver")
+
+    if [ -z "$php_ver" ]; then
+        echo "Error: Versi PHP belum dimasukkan. Contoh: myfpm 81.ini atau myfpm ini 81"
+        exit 1
+    fi
+
+    local pkg_name="php${php_ver}"
+    local ini_file="/etc/opt/remi/${pkg_name}/php.ini"
+    local fpm_conf="/etc/opt/remi/${pkg_name}/php-fpm.conf"
+    local pool_dir="/etc/opt/remi/${pkg_name}/php-fpm.d"
+
+    echo "======================================================================"
+    echo "             INFORMASI LOKASI KONFIGURASI PHP $php_ver ($pkg_name)     "
+    echo "======================================================================"
+
+    if [ -f "$ini_file" ]; then
+        echo " Main php.ini        : $ini_file"
+    else
+        echo " Main php.ini        : $ini_file (File belum ada / PHP belum diinstall)"
+    fi
+
+    if [ -f "$fpm_conf" ]; then
+        echo " Main php-fpm.conf   : $fpm_conf"
+    else
+        echo " Main php-fpm.conf   : $fpm_conf (File belum ada)"
+    fi
+
+    if [ -d "$pool_dir" ]; then
+        echo " FPM Pools Directory : $pool_dir"
+    else
+        echo " FPM Pools Directory : $pool_dir (Direktori belum ada)"
+    fi
+
+    echo "----------------------------------------------------------------------"
+    echo " Perintah Cepat Edit via Terminal:"
+    echo "   nano $ini_file"
+    echo "   vi $ini_file"
+    echo "======================================================================"
+
+    # Jika user menyertakan opsi edit (-e / edit)
+    if [[ "$action" == "-e" || "$action" == "edit" ]]; then
+        if [ ! -f "$ini_file" ]; then
+            echo "Error: File $ini_file tidak ditemukan, tidak dapat membuka editor."
+            exit 1
+        fi
+
+        local editor="${EDITOR:-nano}"
+        if ! command -v "$editor" &>/dev/null; then
+            editor="vi"
+        fi
+
+        echo "==> Membuka $ini_file dengan editor '$editor'..."
+        "$editor" "$ini_file"
+    fi
+}
+
+# 5. Fungsi Restart Service (myfpm restart {81|redis|apache|all})
+restart_service() {
+    local target=$1
+
+    if [ -z "$target" ]; then
+        echo "Error: Tentukan service yang ingin direstart."
+        echo "Contoh: myfpm restart 81, myfpm restart redis, myfpm restart apache, myfpm restart all"
+        exit 1
+    fi
+
+    case "$target" in
+        redis)
+            echo "==> Merestart service Redis..."
+            systemctl restart redis
+            if [ $? -eq 0 ]; then
+                echo "==> Service Redis berhasil direstart."
+            else
+                echo "Error: Gagal merestart service Redis."
+                exit 1
+            fi
+            ;;
+        apache|httpd)
+            echo "==> Merestart service Apache (httpd)..."
+            systemctl restart httpd
+            if [ $? -eq 0 ]; then
+                echo "==> Service Apache (httpd) berhasil direstart."
+            else
+                echo "Error: Gagal merestart service Apache."
+                exit 1
+            fi
+            ;;
+        all)
+            echo "==> Merestart seluruh service PHP-FPM, Redis, dan Apache..."
+            for service in $(systemctl list-unit-files | grep -E '^php[0-9]+-php-fpm\.service' | awk '{print $1}'); do
+                echo "--> Merestart $service..."
+                systemctl restart "$service"
+            done
+            
+            if systemctl is-active --quiet redis 2>/dev/null; then
+                echo "--> Merestart redis..."
+                systemctl restart redis
+            fi
+
+            if systemctl is-active --quiet httpd 2>/dev/null; then
+                echo "--> Merestart httpd..."
+                systemctl restart httpd
+            fi
+            echo "==> Seluruh service berhasil direstart!"
+            ;;
+        *)
+            local php_ver=$(clean_version "$target")
+            if [[ -n "$php_ver" && "$php_ver" =~ ^[0-9]+$ ]]; then
+                local service_name="php${php_ver}-php-fpm"
+                echo "==> Merestart service ${service_name}..."
+                systemctl restart "${service_name}"
+                if [ $? -eq 0 ]; then
+                    echo "==> Service ${service_name} berhasil direstart."
+                else
+                    echo "Error: Gagal merestart service ${service_name}. Pastikan PHP ${php_ver} sudah terinstall."
+                    exit 1
+                fi
+            else
+                echo "Error: Service atau versi PHP '$target' tidak dikenali."
+                echo "Penggunaan: myfpm restart {version|redis|apache|all}"
+                exit 1
+            fi
+            ;;
+    esac
+}
+
+# 6. Fungsi Manajemen Standalone Redis (myfpm redis [install|status|restart|start|stop])
+manage_redis() {
+    local action=${1:-status}
+
+    case "$action" in
+        install)
+            echo "==> Menginstall Redis Server..."
+            yum install epel-release -y
+            yum install redis -y
+            systemctl enable --now redis
+            echo "==> Redis Server berhasil diinstall dan dijalankan."
+            ;;
+        status)
+            systemctl status redis
+            ;;
+        restart)
+            restart_service redis
+            ;;
+        start)
+            echo "==> Menjalankan service Redis..."
+            systemctl start redis
+            ;;
+        stop)
+            echo "==> Menghentikan service Redis..."
+            systemctl stop redis
+            ;;
+        *)
+            echo "Penggunaan: myfpm redis [install|status|restart|start|stop]"
+            ;;
+    esac
+}
+
 # Parser Argumen Utama
 case "$1" in
-    -i)
+    -i|install)
         install_php "$2"
         ;;
-    -u)
+    -u|user)
         shift
         USER_NAME=""
         PHP_VER=""
@@ -276,10 +473,28 @@ case "$1" in
     use)
         use_php "$2"
         ;;
+    ini|config)
+        show_ini_path "$2" "$3"
+        ;;
+    *.ini|*.INI)
+        show_ini_path "$1" "$2"
+        ;;
+    restart)
+        restart_service "$2"
+        ;;
+    redis)
+        manage_redis "$2"
+        ;;
     -h|--help)
         show_help
         ;;
     *)
-        show_help
+        RAW_INPUT="$1"
+        CLEANED=$(clean_version "$RAW_INPUT")
+        if [[ -n "$CLEANED" && "$CLEANED" =~ ^[0-9]+$ ]]; then
+            show_ini_path "$RAW_INPUT" "$2"
+        else
+            show_help
+        fi
         ;;
 esac

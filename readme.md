@@ -1,13 +1,16 @@
 # MyFPM - PHP & FPM Manager for CWP (CentOS Web Panel / AlmaLinux)
 
-`myfpm` adalah CLI utility script berbasis Bash yang dirancang khusus untuk mempermudah manajemen instalasi multiple versi PHP, konfigurasi FPM pool per-user, manajemen versi PHP CLI (switching), hingga otomatisasi integrasi dengan Apache Web Server di environment CWP (CentOS Web Panel / AlmaLinux 7, 8, dan 9).
+`myfpm` adalah CLI utility script berbasis Bash yang dirancang khusus untuk mempermudah manajemen instalasi multiple versi PHP, dukungan Redis Server & Extension, lokasi & editor file `php.ini`, restart service FPM/Redis/Apache, konfigurasi FPM pool per-user, hingga otomatisasi integrasi dengan Apache Web Server di environment CWP (CentOS Web Panel / AlmaLinux 7, 8, dan 9).
 
 ---
 
 ## 🚀 Fitur Utama
 
 - **Auto OS Detection:** Otomatis mendeteksi versi OS (RHEL/CentOS/AlmaLinux 7, 8, atau 9) dan menyesuaikan repository EPEL & Remi yang dibutuhkan.
-- **Full PHP Extensions Installer:** Menginstall versi PHP pilihan lengkap dengan ekstensi esensial (GD, MBString, OPcache, MySQLnd, BCMath, Intl, Sodium, dll).
+- **Full PHP & Redis Installer:** Menginstall versi PHP pilihan lengkap dengan ekstensi esensial (GD, MBString, OPcache, MySQLnd, BCMath, Intl, Sodium, dan PECL Redis), serta mengkonfigurasi Redis Server secara otomatis.
+- **PHP INI File Locator & Quick Editor:** Cepat mencari lokasi `php.ini`, `php-fpm.conf`, serta direktori pool per versi PHP, dan bisa langsung membuka editor (`nano`/`vi`) dengan flag `-e` / `edit`.
+- **Flexible Version Normalization:** Mendukung berbagai format penulisan versi PHP secara otomatis (contoh: `81`, `8.1`, `php81`, `php8.1`, `81.ini`).
+- **Unified Restart Manager:** Mempermudah restart service per versi PHP-FPM (`myfpm restart 81`), Redis (`myfpm restart redis`), Apache (`myfpm restart apache`), maupun seluruh service sekaligus (`myfpm restart all`).
 - **Automated User FPM Pool:** Membuat file konfigurasi pool FPM khusus untuk user sistem secara instan, lengkap dengan pengaturan socket dan panduan `.htaccess`.
 - **Global PHP Shortcuts:** Membuat shortcut global per versi PHP (contoh: `php81`, `php82`, `php74`) sehingga bisa langsung dipakai menjalankan perintah CLI/Artisan tanpa repot set alias manual.
 - **Session PHP Switching:** Memindahkan versi PHP aktif di sesi terminal saat ini dengan mudah menggunakan `myfpm use {version}`.
@@ -19,8 +22,7 @@
 Masuk ke server VPS Anda sebagai `root`, kemudian jalankan perintah berikut untuk menginstall `myfpm` ke sistem:
 
 ```bash
-curl -O [https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/install.sh](https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/install.sh) && sh install.sh
-
+curl -sL https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/install.sh | bash
 ```
 
 ---
@@ -29,44 +31,92 @@ curl -O [https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/install.sh](h
 
 Setelah terinstall, Anda bisa mengetikkan `myfpm -h` di terminal untuk melihat bantuan menu. Berikut adalah daftar perintah yang tersedia:
 
-### 1. Install Versi PHP & Ekstensi Lengkap
+### 1. Install Versi PHP & Ekstensi Lengkap (Termasuk Redis)
 
-Menginstall PHP beserta FPM dan modul-modul pentingnya (otomatis mendeteksi versi Remi & mengaktifkan `proxy_fcgi` di Apache).
+Menginstall PHP beserta FPM, Redis Server, dan modul-modul pentingnya:
 
 ```bash
 myfpm -i 81
-# Contoh lain: myfpm -i 74, myfpm -i 82, myfpm -i 83
-
+# Format versi lain yang didukung: myfpm -i 8.1, myfpm -i php8.1
 ```
 
-### 2. Membuat FPM Pool untuk User Sistem
+### 2. Cek Lokasi & Edit File Konfigurasi (php.ini)
 
-Membuat konfigurasi socket FPM khusus untuk user tertentu (misalnya user `akademik`) menggunakan versi PHP tertentu.
+Melihat lokasi file `php.ini` dan konfigurasi FPM:
+
+```bash
+myfpm 81.ini
+# atau
+myfpm ini 8.1
+```
+
+Membuka file `php.ini` langsung di terminal menggunakan editor (`nano` / `vi`):
+
+```bash
+myfpm 81.ini -e
+# atau
+myfpm ini 81 edit
+```
+
+### 3. Restart Service (PHP-FPM, Redis, Apache)
+
+Merestart service PHP-FPM spesifik versi:
+
+```bash
+myfpm restart 81
+# atau
+myfpm restart 8.1
+```
+
+Merestart Redis Server:
+
+```bash
+myfpm restart redis
+```
+
+Merestart seluruh service terkait sekaligus (semua PHP-FPM, Redis, & Apache):
+
+```bash
+myfpm restart all
+```
+
+### 4. Manajemen Service Redis
+
+Mengelola service Redis secara khusus:
+
+```bash
+myfpm redis status
+myfpm redis restart
+myfpm redis start
+myfpm redis stop
+myfpm redis install
+```
+
+### 5. Membuat FPM Pool untuk User Sistem
+
+Membuat konfigurasi socket FPM khusus untuk user tertentu (misalnya user `akademik`) menggunakan versi PHP tertentu:
 
 ```bash
 myfpm -u akademik -v 81
-
 ```
 
 *Script ini akan otomatis menghasilkan path socket `/run/php81-akademik.sock` dan mencetak blok kode `.htaccess` yang siap Anda pasang di direktori project web.*
 
-### 3. Switch Versi PHP di Sesi Terminal
+### 6. Switch Versi PHP di Sesi Terminal
 
 Mengganti versi PHP dan Composer aktif untuk sesi terminal saat ini:
 
 ```bash
 myfpm use 81
-
 ```
 
 Untuk kembali ke versi default bawaan CWP:
 
 ```bash
 myfpm use default
-
 ```
 
-### 4. Menjalankan Command PHP Spesifik (Global CLI)
+### 7. Menjalankan Command PHP Spesifik (Global CLI)
 
 Anda dapat langsung mengeksekusi versi PHP tertentu tanpa harus melakukan `use` terlebih dahulu (sangat berguna untuk cron job atau perintah Artisan):
 
@@ -74,7 +124,6 @@ Anda dapat langsung mengeksekusi versi PHP tertentu tanpa harus melakukan `use` 
 php81 artisan config:clear
 php82 artisan cache:clear
 php74 -v
-
 ```
 
 ---
@@ -92,8 +141,4 @@ Script ini dilengkapi dengan beberapa validasi untuk mencegah error di server:
 
 ## 📄 License
 
-Open-source project licensed under the [MIT License](https://www.google.com/search?q=LICENSE).
-
-```
-
-```
+Open-source project licensed under the [MIT License](LICENSE).
