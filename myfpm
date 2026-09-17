@@ -114,7 +114,7 @@ install_php() {
     fi
 
     local pkg_name="php${php_ver}"
-    echo "==> Menginstall ${pkg_name}, ekstensi lengkap, dan Redis extension..."
+    echo "==> Menginstall ${pkg_name} dan ekstensi lengkap..."
     yum install -y \
         ${pkg_name} \
         ${pkg_name}-php-fpm \
@@ -128,8 +128,7 @@ install_php() {
         ${pkg_name}-php-zip \
         ${pkg_name}-php-bcmath \
         ${pkg_name}-php-intl \
-        ${pkg_name}-php-sodium \
-        ${pkg_name}-php-pecl-redis\*
+        ${pkg_name}-php-sodium
 
     # Validasi jika yum install gagal di tengah jalan
     if [ $? -ne 0 ]; then
@@ -141,6 +140,11 @@ install_php() {
         echo "===================================================="
         exit 1
     fi
+
+    echo "==> Menginstall ekstensi PECL Redis untuk ${pkg_name}..."
+    yum install -y ${pkg_name}-php-pecl-redis5 2>/dev/null || \
+    yum install -y ${pkg_name}-php-pecl-redis6 2>/dev/null || \
+    yum install -y ${pkg_name}-php-pecl-redis 2>/dev/null
 
     echo "==> Menyiapkan dan mengaktifkan service Redis Server..."
     yum install -y redis
