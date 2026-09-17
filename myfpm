@@ -246,15 +246,15 @@ setup_user_pool() {
     sed -i "s/^listen.mode = .*/listen.mode = 0660/g" "$pool_file"
 
     # Comment listen.allowed_clients
-    sed -i "s/^listen.allowed_clients/#listen.allowed_clients/g" "$pool_file"
-    sed -i "s/^;listen.allowed_clients/#listen.allowed_clients/g" "$pool_file"
+    sed -i "s/^listen.allowed_clients/;listen.allowed_clients/g" "$pool_file"
+    sed -i "s/^#listen.allowed_clients/;listen.allowed_clients/g" "$pool_file"
 
     # Set path listen socket
     sed -i "s#^listen = .*#listen = ${socket_path}#g" "$pool_file"
 
     # Comment listen.acl_users
-    sed -i "s/^listen.acl_users/#listen.acl_users/g" "$pool_file"
-    sed -i "s/^;listen.acl_users/#listen.acl_users/g" "$pool_file"
+    sed -i "s/^listen.acl_users/;listen.acl_users/g" "$pool_file"
+    sed -i "s/^#listen.acl_users/;listen.acl_users/g" "$pool_file"
 
     echo "==> Merestart service ${pkg_name}-php-fpm..."
     systemctl restart ${pkg_name}-php-fpm
