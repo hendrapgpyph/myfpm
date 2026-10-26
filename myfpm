@@ -40,33 +40,40 @@ show_help() {
     echo "      redis server, fpm, start service, aktifkan proxy_fcgi apache,"
     echo "      dan buat shortcut global php{version})"
     echo ""
-    echo "  2. Buat Pool FPM untuk User Sistem [Butuh Root]:"
+    echo "  2. Uninstall PHP & Ekstensi Lengkap [Butuh Root]:"
+    echo "     myfpm uninstall {version}  (atau myfpm -r {version})"
+    echo "     Contoh: myfpm uninstall 82  (atau myfpm uninstall 8.2)"
+    echo "     Bypass konfirmasi: myfpm uninstall 82 -y"
+    echo "     (Stop & disable service FPM, hapus paket yum, bersihkan direktori"
+    echo "      konfigurasi, socket, dan shortcut global php{version})"
+    echo ""
+    echo "  3. Buat Pool FPM untuk User Sistem [Butuh Root]:"
     echo "     myfpm -u {user} -v {version}"
     echo "     Contoh: myfpm -u akademik -v 81"
     echo "     (Membuat config socket khusus user dan panduan .htaccess)"
     echo ""
-    echo "  3. Switch Versi PHP Aktif di Sesi Terminal (Aliasing) [Bisa Non-Root]:"
+    echo "  4. Switch Versi PHP Aktif di Sesi Terminal (Aliasing) [Bisa Non-Root]:"
     echo "     source myfpm use {version}   (atau . myfpm use {version})"
     echo "     Contoh: source myfpm use 81"
     echo "     Contoh kembali ke default: source myfpm use default"
     echo ""
-    echo "  4. Cek Lokasi & Edit File Konfigurasi (php.ini) [Bisa Non-Root]:"
+    echo "  5. Cek Lokasi & Edit File Konfigurasi (php.ini) [Bisa Non-Root]:"
     echo "     myfpm {version}.ini  atau  myfpm ini {version}"
     echo "     Contoh: myfpm 81.ini"
     echo "     Contoh: myfpm ini 8.1"
     echo "     Contoh langsung edit: myfpm 81.ini -e (atau myfpm ini 81 edit)"
     echo ""
-    echo "  5. Restart Service (PHP-FPM / Redis / Apache / All) [Butuh Root]:"
+    echo "  6. Restart Service (PHP-FPM / Redis / Apache / All) [Butuh Root]:"
     echo "     myfpm restart {version|redis|apache|all}"
     echo "     Contoh: myfpm restart 81       (Restart php81-php-fpm)"
     echo "     Contoh: myfpm restart redis    (Restart service Redis)"
     echo "     Contoh: myfpm restart all      (Restart seluruh service)"
     echo ""
-    echo "  6. Manajemen Standalone Redis:"
+    echo "  7. Manajemen Standalone Redis:"
     echo "     myfpm redis [install|status|restart|start|stop]"
     echo "     Contoh: myfpm redis status"
     echo ""
-    echo "  7. Bantuan Command:"
+    echo "  8. Bantuan Command:"
     echo "     myfpm -h  atau  myfpm --help"
     echo "----------------------------------------------------------------------"
     echo " Tips Global Shortcut (Bisa Langsung Dipakai Non-Root User):"
@@ -192,7 +199,141 @@ install_php() {
     echo "==> Instalasi PHP $php_ver & Redis Selesai!"
 }
 
-# 2. Fungsi Setup User Pool (-u dan -v) dengan Validasi User & FPM
+# 2. Fungsi Uninstall PHP (-r / uninstall / remove)
+uninstall_php() {
+    local raw_ver=""
+    local force=0
+
+    # Parse argumen untuk versi dan opsi bypass -y / -f
+    for arg in "$@"; do
+        case "$arg" in
+            -y|--yes|-f|--force)
+                force=1
+                ;;
+            *)
+                if [ -z "$raw_ver" ]; then
+                    raw_ver="$arg"
+                fi
+                ;;
+        esac
+    done
+
+    if [ -z "$raw_ver" ]; then
+        echo "Error: Versi PHP belum dimasukkan. Contoh: myfpm uninstall 82 (atau myfpm -r 82)"
+        exit 1
+    fi
+
+    local php_ver=$(clean_version "$raw_ver")
+    local pkg_name="php${php_ver}"
+
+    # Cek apakah paket atau direktori PHP versi tersebut terdeteksi di sistem
+    local is_installed=0
+    if rpm -qa "${pkg_name}*" 2>/dev/null | grep -q "${pkg_name}"; then
+        is_installed=1
+    elif [ -d "/opt/remi/${pkg_name}" ] || [ -f "/usr/bin/php${php_ver}" ] || [ -d "/etc/opt/remi/${pkg_name}" ]; then
+        is_installed=1
+    fi
+
+    if [ "$is_installed" -eq 0 ]; then
+        echo "Peringatan: PHP $php_ver (${pkg_name}) tampaknya tidak terinstall di sistem."
+        if [ "$force" -ne 1 ]; then
+            if [ -t 0 ]; then
+                read -r -p "Tetap lanjutkan proses pembersihan (cleanup)? [y/N]: " confirm_cleanup
+                case "$confirm_cleanup" in
+                    [yY][eE][sS]|[yY])
+                        ;;
+                    *)
+                        echo "Operasi uninstall dibatalkan."
+                        exit 0
+                        ;;
+                esac
+            fi
+        fi
+    else
+        # Konfirmasi sebelum uninstall jika interaktif dan tanpa flag -y
+        if [ "$force" -ne 1 ] && [ -t 0 ]; then
+            echo "======================================================================"
+            echo " PERINGATAN: Anda akan menghapus PHP $php_ver (${pkg_name}) beserta:"
+            echo " - Seluruh paket & modul ${pkg_name} (yum)"
+            echo " - Service ${pkg_name}-php-fpm"
+            echo " - Konfigurasi pool & php.ini di /etc/opt/remi/${pkg_name}"
+            echo " - Shortcut global /usr/bin/php${php_ver}"
+            echo " - Socket aktif di /run/${pkg_name}-*.sock"
+            echo "======================================================================"
+            read -r -p "Lanjutkan uninstall PHP $php_ver? [y/N]: " confirm
+            case "$confirm" in
+                [yY][eE][sS]|[yY])
+                    ;;
+                *)
+                    echo "Operasi uninstall dibatalkan."
+                    exit 0
+                    ;;
+            esac
+        fi
+    fi
+
+    echo "==> Memulai proses uninstall PHP $php_ver (${pkg_name})..."
+
+    # 1. Hentikan dan nonaktifkan service PHP-FPM
+    local service_name="${pkg_name}-php-fpm"
+    echo "==> Menghentikan service ${service_name}..."
+    if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+        systemctl stop "$service_name"
+    fi
+
+    echo "==> Menonaktifkan service ${service_name}..."
+    if systemctl is-enabled --quiet "$service_name" 2>/dev/null; then
+        systemctl disable "$service_name" 2>/dev/null
+    fi
+
+    # 2. Hapus shortcut global /usr/bin/php{version}
+    local bin_path="/usr/bin/php${php_ver}"
+    if [ -L "$bin_path" ] || [ -f "$bin_path" ]; then
+        rm -f "$bin_path"
+        echo "==> Shortcut global '$bin_path' telah dihapus."
+    fi
+
+    # 3. Hapus socket dan PID file di /run
+    echo "==> Membersihkan socket dan PID di /run..."
+    rm -f /run/${pkg_name}-*.sock 2>/dev/null
+    rm -f /run/${pkg_name}-php-fpm.pid 2>/dev/null
+
+    # 4. Hapus paket-paket yum terkait php{version}
+    echo "==> Menghapus paket ${pkg_name} dan ekstensi via yum..."
+    yum remove -y "${pkg_name}*"
+
+    # 5. Bersihkan sisa direktori instalasi dan konfigurasi
+    if [ -d "/etc/opt/remi/${pkg_name}" ]; then
+        echo "==> Menghapus direktori konfigurasi /etc/opt/remi/${pkg_name}..."
+        rm -rf "/etc/opt/remi/${pkg_name}"
+    fi
+
+    if [ -d "/opt/remi/${pkg_name}" ]; then
+        echo "==> Menghapus direktori instalasi /opt/remi/${pkg_name}..."
+        rm -rf "/opt/remi/${pkg_name}"
+    fi
+
+    if [ -d "/var/opt/remi/${pkg_name}" ]; then
+        echo "==> Menghapus direktori log & session /var/opt/remi/${pkg_name}..."
+        rm -rf "/var/opt/remi/${pkg_name}"
+    fi
+
+    # 6. Reload systemd daemon
+    systemctl daemon-reload
+    systemctl reset-failed 2>/dev/null
+
+    echo ""
+    echo "======================================================================"
+    echo " SUKSES! PHP $php_ver (${pkg_name}) berhasil di-uninstall dari sistem."
+    echo "======================================================================"
+    echo " Catatan Penting:"
+    echo " - Jika ada website/vhost yang sebelumnya mengarah ke socket PHP $php_ver,"
+    echo "   silakan perbarui file .htaccess atau konfigurasi web server ke versi lain."
+    echo " - Service Redis Server tetap dipertahankan untuk versi PHP lainnya."
+    echo "======================================================================"
+}
+
+# 3. Fungsi Setup User Pool (-u dan -v) dengan Validasi User & FPM
 setup_user_pool() {
     local user=$1
     local raw_ver=$2
@@ -276,7 +417,7 @@ setup_user_pool() {
     echo "===================================================="
 }
 
-# 3. Fungsi Switch CLI Version (myfpm use {version})
+# 4. Fungsi Switch CLI Version (myfpm use {version})
 use_php() {
     local raw_ver=$1
 
@@ -301,7 +442,7 @@ use_php() {
     fi
 }
 
-# 4. Fungsi Menampilkan / Mengedit Lokasi File INI (myfpm 81.ini / myfpm ini 81)
+# 5. Fungsi Menampilkan / Mengedit Lokasi File INI (myfpm 81.ini / myfpm ini 81)
 show_ini_path() {
     local raw_ver=$1
     local action=$2
@@ -362,7 +503,7 @@ show_ini_path() {
     fi
 }
 
-# 5. Fungsi Restart Service (myfpm restart {81|redis|apache|all})
+# 6. Fungsi Restart Service (myfpm restart {81|redis|apache|all})
 restart_service() {
     local target=$1
 
@@ -432,7 +573,7 @@ restart_service() {
     esac
 }
 
-# 6. Fungsi Manajemen Standalone Redis (myfpm redis [install|status|restart|start|stop])
+# 7. Fungsi Manajemen Standalone Redis (myfpm redis [install|status|restart|start|stop])
 manage_redis() {
     local action=${1:-status}
 
@@ -471,6 +612,11 @@ case "$1" in
     -i|install)
         check_root
         install_php "$2"
+        ;;
+    -r|uninstall|remove)
+        check_root
+        shift
+        uninstall_php "$@"
         ;;
     -u|user|pool)
         check_root
