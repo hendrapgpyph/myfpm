@@ -18,12 +18,24 @@
 
 ---
 
-## 📥 Cara Install (One-Liner Installer)
+## 📥 Cara Install & Update (One-Liner)
 
+### Install Baru:
 Masuk ke server VPS Anda sebagai `root`, kemudian jalankan perintah berikut untuk menginstall `myfpm` ke sistem:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/install.sh | bash
+```
+
+### Update ke Versi Terbaru:
+Jika `myfpm` sudah terinstall dan ingin memperbarui script ke versi terbaru:
+
+```bash
+# Opsi 1: Menggunakan one-liner updater
+curl -sL https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/update.sh | bash
+
+# Opsi 2: Langsung dari CLI myfpm (Butuh Root)
+myfpm update
 ```
 
 ---
@@ -148,6 +160,16 @@ Anda dapat langsung mengeksekusi versi PHP tertentu tanpa harus melakukan `use` 
 php81 artisan config:clear
 php82 artisan cache:clear
 php74 -v
+```
+
+### 9. Update Script MYFPM
+
+Memperbarui `myfpm` ke versi terbaru langsung dari terminal (Butuh Root):
+
+```bash
+myfpm update
+# atau
+myfpm self-update
 ```
 
 ---

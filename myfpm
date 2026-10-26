@@ -73,7 +73,11 @@ show_help() {
     echo "     myfpm redis [install|status|restart|start|stop]"
     echo "     Contoh: myfpm redis status"
     echo ""
-    echo "  8. Bantuan Command:"
+    echo "  8. Update MYFPM ke Versi Terbaru [Butuh Root]:"
+    echo "     myfpm update  (atau myfpm self-update)"
+    echo "     (Mengunduh dan memperbarui script myfpm ke versi terbaru dari GitHub)"
+    echo ""
+    echo "  9. Bantuan Command:"
     echo "     myfpm -h  atau  myfpm --help"
     echo "----------------------------------------------------------------------"
     echo " Tips Global Shortcut (Bisa Langsung Dipakai Non-Root User):"
@@ -607,8 +611,50 @@ manage_redis() {
     esac
 }
 
+# 8. Fungsi Update MYFPM (myfpm update / myfpm self-update)
+update_myfpm() {
+    echo "===================================================="
+    echo "             MYFPM - Self Updater                   "
+    echo "===================================================="
+    echo "==> Mengunduh versi terbaru MYFPM dari GitHub..."
+
+    local target_bin="/usr/local/bin/myfpm"
+    local temp_file="/tmp/myfpm_latest.$$"
+    local repo_url="https://raw.githubusercontent.com/hendrapgpyph/myfpm/main/myfpm"
+
+    curl -sL "$repo_url" -o "$temp_file"
+    if [ $? -ne 0 ] || [ ! -s "$temp_file" ]; then
+        echo "Error: Gagal mengunduh file MYFPM terbaru. Periksa koneksi internet Anda."
+        rm -f "$temp_file"
+        exit 1
+    fi
+
+    if ! head -n 1 "$temp_file" | grep -q "#!/bin/bash"; then
+        echo "Error: File yang diunduh tidak valid."
+        rm -f "$temp_file"
+        exit 1
+    fi
+
+    # Backup file saat ini jika ada
+    if [ -f "$target_bin" ]; then
+        cp "$target_bin" "${target_bin}.bak" 2>/dev/null
+    fi
+
+    mv "$temp_file" "$target_bin"
+    chmod +x "$target_bin"
+
+    echo "===================================================="
+    echo " SUKSES! MYFPM berhasil diperbarui ke versi terbaru."
+    echo " Ketik 'myfpm -h' untuk melihat menu bantuan."
+    echo "===================================================="
+}
+
 # Parser Argumen Utama
 case "$1" in
+    update|self-update)
+        check_root
+        update_myfpm
+        ;;
     -i|install)
         check_root
         install_php "$2"
